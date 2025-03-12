@@ -12,8 +12,8 @@ export default function Home() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        width: '100vw',
-        height: '100vh',
+        width: '100%',
+        height: '100%',
       }}
     >
       <h1>🔥 SV Frontend screening test 🔥</h1>

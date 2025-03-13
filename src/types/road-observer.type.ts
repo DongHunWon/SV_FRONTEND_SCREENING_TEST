@@ -53,3 +53,8 @@ export type Road = {
   width: number;
   length: number;
 };
+
+export type Coordinate = {
+  x: number;
+  y: number;
+}

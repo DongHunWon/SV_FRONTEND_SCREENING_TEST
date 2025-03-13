@@ -1,9 +1,14 @@
 'use client';
 
 import { Coordinate, Vehicle } from '@/types/road-observer.type';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import useRoadStream from '@/hooks/useRoadStream.hook';
 import { ROAD_LENGTH, ROAD_WIDTH } from '@/consts/road-observer.const';
+import { Stage, Layer, Rect, Line } from 'react-konva';
+import { RectConfig } from 'konva/lib/shapes/Rect';
+import { LineConfig } from 'konva/lib/shapes/Line';
+
+type Shape = RectConfig | LineConfig;
 
 function radianToDegree(radians: number): number {
   let degree = radians * (180 / Math.PI);
@@ -25,155 +30,153 @@ function calcAngleOfCoordinate(x: number, y: number): number {
 }
 
 const RoadObserverPage = () => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPaused, setIsPaused] = useState(false);
   const [degree, setDegree] = useState(178);
   const { road } = useRoadStream(isPaused);
+  const [shapes, setShapes] = useState<Shape[]>([]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (canvas && road) {
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (road) {
+      const observer = road.observer;
+      const centerX = observer.position.x + observer.width / 2;
+      const centerY = observer.direction === 1 ? observer.position.y + observer.length : observer.position.y;
+      const halfFOV = (((observer.direction === 1 ? 360 - degree : degree) / 2) * Math.PI) / 180;
+      const distance = 1000;
 
-        const observer = road.observer;
-        const centerX = observer.position.x + observer.width / 2;
-        const centerY = observer.direction === 1 ? observer.position.y + observer.length : observer.position.y;
-        const halfFov = (((observer.direction === 1 ? 360 - degree : degree) / 2) * Math.PI) / 180;
-        const distance = 1000;
+      const leftX = centerX - distance * Math.sin(halfFOV);
+      const leftY = centerY - distance * Math.cos(halfFOV);
+      const rightX = centerX + distance * Math.sin(halfFOV);
+      const rightY = centerY - distance * Math.cos(halfFOV);
 
-        const leftX = centerX - distance * Math.sin(halfFov);
-        const leftY = centerY - distance * Math.cos(halfFov);
-        const rightX = centerX + distance * Math.sin(halfFov);
-        const rightY = centerY - distance * Math.cos(halfFov);
+      const rightFOVDegree = radianToDegree(Math.atan2(rightY - centerY, rightX - centerX));
+      const leftFOVDegree = radianToDegree(Math.atan2(leftY - centerY, leftX - centerX));
 
-        // 시야각
-        ctx.beginPath();
-        ctx.moveTo(centerX, centerY);
-        ctx.lineTo(leftX, leftY);
-        ctx.moveTo(centerX, centerY);
-        ctx.lineTo(rightX, rightY);
-        ctx.strokeStyle = 'purple';
-        ctx.stroke();
-        ctx.closePath();
+      const newShapes = [
+        {
+          type: 'line',
+          points: [centerX, centerY, leftX, leftY],
+          stroke: 'purple',
+        },
+        {
+          type: 'line',
+          points: [centerX, centerY, rightX, rightY],
+          stroke: 'purple',
+        },
+        {
+          type: 'rect',
+          x: observer.position.x,
+          y: observer.position.y,
+          width: observer.width,
+          height: observer.length,
+          fill: 'black',
+        },
+      ];
 
-        // observer
-        ctx.fillStyle = 'black';
-        ctx.fillRect(observer.position.x, observer.position.y, observer.width, observer.length);
+      road.vehicles.forEach((vehicle) => {
+        const {
+          width,
+          length,
+          position: { x, y },
+        } = vehicle;
+        const coordinates = getVehicleCoordinate(vehicle);
+        const coordinateDegrees = coordinates.map(({ x: dx, y: dy }) => calcAngleOfCoordinate(dx - centerX, dy - centerY));
+        const minDegree = Math.min(...coordinateDegrees);
+        const maxDegree = Math.max(...coordinateDegrees);
 
-        const blindSpotDegree = degree <= 180 ? (180 - degree) / 2 : (360 - degree) / 2; // 사각지대 각도
-        const leftFovDegree = degree <= 180 ? degree + blindSpotDegree : degree - (90 - blindSpotDegree); // 도로 기준 왼쪽 시야각
-        const rightFovDegree = degree <= 180 ? blindSpotDegree : 360 - (90 - blindSpotDegree); // 도로 기준 오른쪽 시야각
-
-        // 다른 차량
-        road.vehicles.forEach((vehicle) => {
-          const {
-            width,
-            length,
-            position: { x, y },
-          } = vehicle;
-          const coordinates = getVehicleCoordinate(vehicle);
-          const coordinateDegrees = coordinates.map(({ x: dx, y: dy }) => calcAngleOfCoordinate(dx - centerX, dy - centerY));
-          const minDegree = Math.min(...coordinateDegrees);
-          const maxDegree = Math.max(...coordinateDegrees);
-
-          //  3 | 4
-          // ---c---
-          //  2 | 1
-          let color = 'red';
-          if (maxDegree <= 270) {
-            if (minDegree < 90) {
-              if ((rightFovDegree < minDegree && maxDegree < leftFovDegree) || 270 <= rightFovDegree) {
-                color = 'green';
-              } else if (maxDegree <= 90) {
-                // 1 구역
-                if (minDegree <= rightFovDegree && rightFovDegree <= maxDegree) {
-                  const ratio = (maxDegree - rightFovDegree) / (maxDegree - minDegree);
-                  color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
-                }
-              } else {
-                // 1, 2 구역
-                if (minDegree <= rightFovDegree) {
-                  if (maxDegree <= leftFovDegree) {
-                    const ratio = (maxDegree - rightFovDegree) / (maxDegree - minDegree);
-                    color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
-                  } else {
-                    const ratio = (leftFovDegree - rightFovDegree) / (maxDegree - minDegree);
-                    color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
-                  }
-                } else if (leftFovDegree <= maxDegree) {
-                  const ratio = (leftFovDegree - minDegree) / (maxDegree - minDegree);
-                  color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
-                }
+        let color = 'red';
+        if (maxDegree <= 270) {
+          if (minDegree < 90) {
+            if ((rightFOVDegree < minDegree && maxDegree < leftFOVDegree) || 270 <= rightFOVDegree) {
+              color = 'green';
+            } else if (maxDegree <= 90) {
+              if (minDegree <= rightFOVDegree && rightFOVDegree <= maxDegree) {
+                const ratio = (maxDegree - rightFOVDegree) / (maxDegree - minDegree);
+                color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
               }
             } else {
-              // 2, 3 구역
-              if (maxDegree < leftFovDegree) {
-                color = 'green';
-              } else if (minDegree <= leftFovDegree && leftFovDegree <= maxDegree) {
-                const ratio = (leftFovDegree - minDegree) / (maxDegree - minDegree);
+              if (minDegree <= rightFOVDegree) {
+                if (maxDegree <= leftFOVDegree) {
+                  const ratio = (maxDegree - rightFOVDegree) / (maxDegree - minDegree);
+                  color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
+                } else {
+                  const ratio = (leftFOVDegree - rightFOVDegree) / (maxDegree - minDegree);
+                  color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
+                }
+              } else if (leftFOVDegree <= maxDegree) {
+                const ratio = (leftFOVDegree - minDegree) / (maxDegree - minDegree);
                 color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
               }
             }
           } else {
-            // 한 점이 4구역을 포함하는 경우
-            if (leftFovDegree === 270) {
+            if (maxDegree < leftFOVDegree) {
               color = 'green';
+            } else if (minDegree <= leftFOVDegree && leftFOVDegree <= maxDegree) {
+              const ratio = (leftFOVDegree - minDegree) / (maxDegree - minDegree);
+              color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
+            }
+          }
+        } else {
+          if (leftFOVDegree === 270) {
+            color = 'green';
+          } else {
+            if (180 < minDegree && minDegree < 270) {
+              if (minDegree <= leftFOVDegree && rightFOVDegree <= maxDegree) {
+                const ratio = (leftFOVDegree - minDegree + maxDegree - rightFOVDegree) / (maxDegree - minDegree);
+                color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
+              } else if (minDegree <= leftFOVDegree) {
+                const ratio = (leftFOVDegree - minDegree) / (maxDegree - minDegree);
+                color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
+              } else if (270 < rightFOVDegree && rightFOVDegree <= maxDegree) {
+                const ratio = (maxDegree - rightFOVDegree) / (maxDegree - minDegree);
+                color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
+              }
             } else {
-              if (180 < minDegree && minDegree < 270) {
-                // 3, 4 구역
-                if (minDegree <= leftFovDegree && rightFovDegree <= maxDegree) {
-                  const ratio = (leftFovDegree - minDegree + maxDegree - rightFovDegree) / (maxDegree - minDegree);
-                  color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
-                } else if (minDegree <= leftFovDegree) {
-                  const ratio = (leftFovDegree - minDegree) / (maxDegree - minDegree);
-                  color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
-                } else if (270 < rightFovDegree && rightFovDegree <= maxDegree) {
-                  const ratio = (maxDegree - rightFovDegree) / (maxDegree - minDegree);
+              if (270 <= minDegree) {
+                if (270 < rightFOVDegree && rightFOVDegree < minDegree) {
+                  color = 'green';
+                } else if (minDegree <= rightFOVDegree && rightFOVDegree <= maxDegree) {
+                  const ratio = (maxDegree - rightFOVDegree) / (maxDegree - minDegree);
                   color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
                 }
               } else {
-                // 4 구역
-                if (270 <= minDegree) {
-                  if (270 < rightFovDegree && rightFovDegree < minDegree) {
-                    color = 'green';
-                  } else if (minDegree <= rightFovDegree && rightFovDegree <= maxDegree) {
-                    const ratio = (maxDegree - rightFovDegree) / (maxDegree - minDegree);
-                    color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
-                  }
+                if (90 < minDegree) {
+                  const ratio = degree / 360;
+                  color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
                 } else {
-                  if (90 < minDegree) {
-                    const ratio = degree / 360;
-                    color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
+                  const newMinDegree = Math.max(...coordinateDegrees.filter((d) => d <= 90));
+                  const newMaxDegree = Math.min(...coordinateDegrees.filter((d) => 270 <= d));
+                  if (270 <= rightFOVDegree) {
+                    if (rightFOVDegree < newMaxDegree) {
+                      color = 'green';
+                    } else if (newMaxDegree <= rightFOVDegree) {
+                      const ratio = (360 - rightFOVDegree + newMinDegree) / (360 - newMaxDegree + newMinDegree);
+                      color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
+                    }
                   } else {
-                    const newMinDegree = Math.max(...coordinateDegrees.filter((d) => d <= 90));
-                    const newMaxDegree = Math.min(...coordinateDegrees.filter((d) => 270 <= d));
-                    if (270 <= rightFovDegree) {
-                      if (rightFovDegree < newMaxDegree) {
-                        color = 'green';
-                      } else if (newMaxDegree <= rightFovDegree) {
-                        const ratio = (360 - rightFovDegree + newMinDegree) / (360 - newMaxDegree + newMinDegree);
-                        color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
-                      }
-                    } else {
-                      if (rightFovDegree <= newMinDegree) {
-                        const ratio = (newMinDegree - rightFovDegree) / (360 - newMaxDegree + newMinDegree);
-                        color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
-                      }
+                    if (rightFOVDegree <= newMinDegree) {
+                      const ratio = (newMinDegree - rightFOVDegree) / (360 - newMaxDegree + newMinDegree);
+                      color = `rgba(0, 0, 255, ${ratio < 0.1 ? 0.1 : ratio})`;
                     }
                   }
                 }
               }
             }
           }
+        }
 
-          ctx.fillStyle = color;
-          ctx.fillRect(x, y, width, length);
+        newShapes.push({
+          type: 'rect',
+          x,
+          y,
+          width,
+          height: length,
+          fill: color,
         });
-      }
+      });
+
+      setShapes(newShapes);
     }
-  }, [road]);
+  }, [road, degree]);
 
   const handlePause = () => {
     setIsPaused(!isPaused);
@@ -188,7 +191,18 @@ const RoadObserverPage = () => {
           <span>{degree}</span>
         </div>
       </div>
-      <canvas ref={canvasRef} width={ROAD_WIDTH} height={ROAD_LENGTH} style={{ border: '1px solid black' }} />
+      <Stage width={ROAD_WIDTH} height={ROAD_LENGTH} style={{ border: '1px solid black' }}>
+        <Layer>
+          {shapes.map((shape, index) => {
+            if (shape.type === 'rect') {
+              return <Rect key={index} x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill={shape.fill} />;
+            } else if (shape.type === 'line') {
+              return <Line key={index} points={shape.points} stroke={shape.stroke} />;
+            }
+            return null;
+          })}
+        </Layer>
+      </Stage>
     </div>
   );
 };

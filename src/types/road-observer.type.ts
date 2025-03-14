@@ -54,7 +54,59 @@ export type Road = {
   length: number;
 };
 
+/**
+ * konva shape type
+ * 
+ * Rect: vehicles
+ * Line: FOV
+ * Group: opacity pop up
+ */
+
 export type Coordinate = {
   x: number;
   y: number;
+};
+
+export enum COLOR {
+  RED = 'red',
+  GREEN = 'green',
+  BLUE = 'blue',
+  PURPLE = 'purple',
+  BLACK = 'black',
 }
+
+export enum SHAPE_TYPE {
+  RECT = 'rect',
+  LINE = 'line',
+  GROUP = 'group',
+}
+
+export type CommonShape = {
+  id?: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  fill?: string;
+  stroke?: string;
+  opacity?: number;
+  visible?: boolean;
+  strokeWidth?: number;
+  vehicle?: Vehicle;
+};
+
+export type Rect = CommonShape & {
+  type: SHAPE_TYPE.RECT;
+};
+export type Line = CommonShape & {
+  type: SHAPE_TYPE.LINE;
+  points?: number[];
+};
+
+export type Group = CommonShape & {
+  type: SHAPE_TYPE.GROUP;
+  text?: string;
+  fontSize?: number;
+};
+
+export type Shape = Rect | Line | Group;

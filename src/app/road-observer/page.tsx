@@ -1,54 +1,10 @@
 'use client';
 
-import { Coordinate, Vehicle } from '@/types/road-observer.type';
+import { COLOR, Coordinate, Shape, SHAPE_TYPE, Vehicle } from '@/types/road-observer.type';
 import { useEffect, useState } from 'react';
 import useRoadStream from '@/hooks/useRoadStream.hook';
 import { ROAD_LENGTH, ROAD_WIDTH } from '@/consts/road-observer.const';
 import { Stage, Layer, Rect, Line, Text, Group } from 'react-konva';
-
-enum COLOR {
-  RED = 'red',
-  GREEN = 'green',
-  BLUE = 'blue',
-  PURPLE = 'purple',
-  BLACK = 'black',
-}
-
-enum SHAPE_TYPE {
-  RECT = 'rect',
-  LINE = 'line',
-  GROUP = 'group',
-}
-
-type CommonShape = {
-  id?: string;
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-  fill?: string;
-  stroke?: string;
-  opacity?: number;
-  visible?: boolean;
-  strokeWidth?: number;
-  vehicle?: Vehicle;
-};
-
-type Rect = CommonShape & {
-  type: SHAPE_TYPE.RECT;
-};
-type Line = CommonShape & {
-  type: SHAPE_TYPE.LINE;
-  points?: number[];
-};
-
-type Group = CommonShape & {
-  type: SHAPE_TYPE.GROUP;
-  text?: string;
-  fontSize?: number;
-};
-
-type Shape = Rect | Line | Group;
 
 function radianToDegree(radians: number): number {
   let degree = radians * (180 / Math.PI);
@@ -249,6 +205,9 @@ const RoadObserverPage = () => {
     setSelectedVehicle(id);
   };
 
+  if (!road) {
+    return <p>Loading...</p>;
+  }
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
       <div style={{ position: 'absolute', top: '20px', left: '20px', width: '50px', height: '40px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -269,7 +228,7 @@ const RoadObserverPage = () => {
               return (
                 <Group key={index} x={shape.x} y={shape.y}>
                   <Rect width={shape.width} height={shape.height} fill={shape.fill} stroke={shape.stroke} strokeWidth={shape.strokeWidth} />
-                  <Text text={shape.text} fontSize={shape.fontSize} fill="black" width={shape.width} align="center" />
+                  <Text width={shape.width} fill={COLOR.BLACK} text={shape.text} fontSize={shape.fontSize} align="center" />
                 </Group>
               );
             }

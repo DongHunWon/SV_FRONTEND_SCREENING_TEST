@@ -21,6 +21,7 @@ enum SHAPE_TYPE {
 }
 
 type CommonShape = {
+  id?: string;
   x?: number;
   y?: number;
   width?: number;
@@ -73,6 +74,7 @@ const RoadObserverPage = () => {
   const [degree, setDegree] = useState(178);
   const { road } = useRoadStream(isPaused);
   const [shapes, setShapes] = useState<Shape[]>([]);
+  const [selectedVehicle, setSelectedVehicle] = useState<string>();
 
   useEffect(() => {
     if (road) {
@@ -204,7 +206,10 @@ const RoadObserverPage = () => {
           }
         }
 
+        const id = index + '';
+
         newShapes.push({
+          id,
           type: SHAPE_TYPE.RECT,
           x,
           y,
@@ -218,8 +223,8 @@ const RoadObserverPage = () => {
         if (color === COLOR.BLUE) {
           popupGroups.push({
             type: SHAPE_TYPE.GROUP,
-            x: x - 25,
-            y: y - 30,
+            x: x - 20 < 0 ? 0 : ROAD_WIDTH < x + 20 ? ROAD_WIDTH - 40 : x - 20,
+            y: Math.max(0, y - 20),
             width: 40,
             height: 15,
             fill: 'white',
@@ -227,16 +232,21 @@ const RoadObserverPage = () => {
             strokeWidth: 1,
             text: `${(opacity * 100).toFixed(0)}%`,
             fontSize: 14,
+            visible: id === selectedVehicle,
           });
         }
       });
       newShapes.push(...popupGroups);
       setShapes(newShapes);
     }
-  }, [road, degree]);
+  }, [road, degree, selectedVehicle]);
 
   const handlePause = () => {
     setIsPaused(!isPaused);
+  };
+
+  const handleVehicleClick = (id?: string) => {
+    setSelectedVehicle(id);
   };
 
   return (
@@ -252,10 +262,10 @@ const RoadObserverPage = () => {
         <Layer>
           {shapes.map((shape, index) => {
             if (shape.type === SHAPE_TYPE.RECT) {
-              return <Rect key={index} {...shape} />;
+              return <Rect key={index} {...shape} onClick={() => handleVehicleClick(shape.id)} />;
             } else if (shape.type === SHAPE_TYPE.LINE) {
               return <Line key={index} {...shape} />;
-            } else if (shape.type === SHAPE_TYPE.GROUP) {
+            } else if (shape.type === SHAPE_TYPE.GROUP && shape.visible) {
               return (
                 <Group key={index} x={shape.x} y={shape.y}>
                   <Rect width={shape.width} height={shape.height} fill={shape.fill} stroke={shape.stroke} strokeWidth={shape.strokeWidth} />

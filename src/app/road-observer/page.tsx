@@ -117,7 +117,7 @@ function getMinMaxInfo(centerX: number, centerY: number, coordinates: Coordinate
 
 const RoadObserverPage = () => {
   const [isPaused, setIsPaused] = useState(false);
-  const [degree, setDegree] = useState(360);
+  const [degree, setDegree] = useState(178);
   const { road } = useRoadStream(isPaused);
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<string>();

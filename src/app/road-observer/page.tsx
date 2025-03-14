@@ -6,6 +6,25 @@ import useRoadStream from '@/hooks/useRoadStream.hook';
 import { ROAD_LENGTH, ROAD_WIDTH } from '@/consts/road-observer.const';
 import { Stage, Layer, Rect, Line, Text, Group } from 'react-konva';
 
+const ZONE = {
+  1: 1,
+  12: 12,
+  2: 2,
+  23: 23,
+  3: 3,
+  34: 34,
+  4: 4,
+  14: 14,
+  1234: 1234,
+} as const;
+type ZONE = keyof typeof ZONE;
+
+type MinMaxInfo = {
+  minDegree: number;
+  maxDegree: number;
+  zone: ZONE;
+};
+
 function radianToDegree(radians: number): number {
   let degree = radians * (180 / Math.PI);
   degree = (degree + 360) % 360;
@@ -25,9 +44,80 @@ function calcAngleOfCoordinate(x: number, y: number): number {
   return radianToDegree(Math.atan2(y, x));
 }
 
+function getMinMaxInfo(centerX: number, centerY: number, coordinates: Coordinate[]): MinMaxInfo {
+  const xs = coordinates.map((c) => c.x);
+  const ys = coordinates.map((c) => c.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+  const getPointDegree = ({ x, y }: Coordinate) => calcAngleOfCoordinate(x - centerX, y - centerY);
+
+  let minDegreeCoordinate: Coordinate;
+  let maxDegreeCoordinate: Coordinate;
+  let zone: ZONE;
+  if (centerX <= minX) {
+    // 1, 4 구역
+    if (centerY <= minY) {
+      // 1 구역
+      minDegreeCoordinate = coordinates[1];
+      maxDegreeCoordinate = coordinates[3];
+      zone = ZONE[1];
+    } else if (maxY <= centerY) {
+      // 4 구역
+      minDegreeCoordinate = coordinates[0];
+      maxDegreeCoordinate = coordinates[2];
+      zone = ZONE[4];
+    } else {
+      // 1, 4 경계 구간
+      minDegreeCoordinate = coordinates[3];
+      maxDegreeCoordinate = coordinates[0];
+      zone = ZONE[14];
+    }
+  } else if (maxX <= centerX) {
+    // 2, 3 구역
+    if (centerY <= minY) {
+      // 2 구역
+      minDegreeCoordinate = coordinates[2];
+      maxDegreeCoordinate = coordinates[0];
+      zone = ZONE[2];
+    } else if (maxY <= centerY) {
+      // 3 구역
+      minDegreeCoordinate = coordinates[3];
+      maxDegreeCoordinate = coordinates[1];
+      zone = ZONE[3];
+    } else {
+      // 2, 3 경계 구간
+      minDegreeCoordinate = coordinates[2];
+      maxDegreeCoordinate = coordinates[1];
+      zone = ZONE[23];
+    }
+  } else {
+    // y축 경계 구간
+    if (centerY <= minY) {
+      // 1, 2 경계 구간
+      minDegreeCoordinate = coordinates[1];
+      maxDegreeCoordinate = coordinates[0];
+      zone = ZONE[12];
+    } else if (maxY <= centerY) {
+      // 3, 4 경계 구간
+      minDegreeCoordinate = coordinates[3];
+      maxDegreeCoordinate = coordinates[2];
+      zone = ZONE[34];
+    } else {
+      // 1, 2, 3, 4 경계 구간
+      return { minDegree: 360, maxDegree: 360, zone: ZONE[1234] };
+    }
+  }
+
+  const minDegree = getPointDegree(minDegreeCoordinate);
+  const maxDegree = getPointDegree(maxDegreeCoordinate);
+  return { minDegree, maxDegree, zone };
+}
+
 const RoadObserverPage = () => {
   const [isPaused, setIsPaused] = useState(false);
-  const [degree, setDegree] = useState(178);
+  const [degree, setDegree] = useState(360);
   const { road } = useRoadStream(isPaused);
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<string>();
@@ -35,9 +125,10 @@ const RoadObserverPage = () => {
   useEffect(() => {
     if (road) {
       const observer = road.observer;
+      const direction = observer.direction;
       const centerX = observer.position.x + observer.width / 2;
-      const centerY = observer.direction === 1 ? observer.position.y + observer.length : observer.position.y;
-      const halfFOV = (((observer.direction === 1 ? 360 - degree : degree) / 2) * Math.PI) / 180;
+      const centerY = direction === 1 ? observer.position.y + observer.length : observer.position.y;
+      const halfFOV = (((direction === 1 ? 360 - degree : degree) / 2) * Math.PI) / 180;
       const distance = 1000;
 
       const leftX = centerX - distance * Math.sin(halfFOV);
@@ -47,6 +138,7 @@ const RoadObserverPage = () => {
 
       const leftFOVDegree = radianToDegree(Math.atan2(leftY - centerY, leftX - centerX)); // 도로 기준 왼쪽 시야각
       const rightFOVDegree = radianToDegree(Math.atan2(rightY - centerY, rightX - centerX)); // 도로 기준 오른쪽 시야각
+
       const newShapes: Shape[] = [
         {
           type: SHAPE_TYPE.LINE,
@@ -67,102 +159,136 @@ const RoadObserverPage = () => {
           fill: COLOR.BLACK,
         },
       ];
-
       const popupGroups: Shape[] = [];
+
       road.vehicles.forEach((vehicle, index) => {
         const {
           width,
           length,
           position: { x, y },
         } = vehicle;
+        const id = index + '';
         const coordinates = getVehicleCoordinate(vehicle);
-        const coordinateDegrees = coordinates.map(({ x: dx, y: dy }) => calcAngleOfCoordinate(dx - centerX, dy - centerY));
-        const minDegree = Math.min(...coordinateDegrees);
-        const maxDegree = Math.max(...coordinateDegrees);
+        const { minDegree, maxDegree, zone } = getMinMaxInfo(centerX, centerY, coordinates);
+        let fullRange = maxDegree - minDegree;
 
         let color = COLOR.RED;
         let opacity = 1;
-        if (maxDegree <= 270) {
-          if (minDegree < 90) {
-            if ((rightFOVDegree < minDegree && maxDegree < leftFOVDegree) || 270 <= rightFOVDegree) {
-              color = COLOR.GREEN;
-            } else if (maxDegree <= 90) {
-              if (minDegree <= rightFOVDegree && rightFOVDegree <= maxDegree) {
-                opacity = (maxDegree - rightFOVDegree) / (maxDegree - minDegree);
-                color = COLOR.BLUE;
-              }
-            } else {
-              if (minDegree <= rightFOVDegree) {
-                if (maxDegree <= leftFOVDegree) {
-                  opacity = (maxDegree - rightFOVDegree) / (maxDegree - minDegree);
-                  color = COLOR.BLUE;
-                } else {
-                  opacity = (leftFOVDegree - rightFOVDegree) / (maxDegree - minDegree);
-                  color = COLOR.BLUE;
-                }
-              } else if (leftFOVDegree <= maxDegree) {
-                opacity = (leftFOVDegree - minDegree) / (maxDegree - minDegree);
-                color = COLOR.BLUE;
-              }
-            }
-          } else {
-            if (maxDegree < leftFOVDegree) {
-              color = COLOR.GREEN;
-            } else if (minDegree <= leftFOVDegree && leftFOVDegree <= maxDegree) {
-              opacity = (leftFOVDegree - minDegree) / (maxDegree - minDegree);
-              color = COLOR.BLUE;
-            }
-          }
+
+        if (leftFOVDegree === 90) {
+          color = direction === 1 ? COLOR.RED : COLOR.GREEN;
+        } else if (leftFOVDegree === 270) {
+          color = direction === 1 ? COLOR.GREEN : COLOR.RED;
         } else {
-          if (leftFOVDegree === 270) {
-            color = COLOR.GREEN;
-          } else {
-            if (180 < minDegree && minDegree < 270) {
-              if (minDegree <= leftFOVDegree && rightFOVDegree <= maxDegree) {
-                opacity = (leftFOVDegree - minDegree + maxDegree - rightFOVDegree) / (maxDegree - minDegree);
-                color = COLOR.BLUE;
-              } else if (minDegree <= leftFOVDegree) {
-                opacity = (leftFOVDegree - minDegree) / (maxDegree - minDegree);
-                color = COLOR.BLUE;
-              } else if (270 < rightFOVDegree && rightFOVDegree <= maxDegree) {
-                opacity = (maxDegree - rightFOVDegree) / (maxDegree - minDegree);
-                color = COLOR.BLUE;
-              }
-            } else {
-              if (270 <= minDegree) {
-                if (270 < rightFOVDegree && rightFOVDegree < minDegree) {
-                  color = COLOR.GREEN;
+          switch (zone) {
+            case ZONE[1]:
+              if (rightFOVDegree <= 90) {
+                if (rightFOVDegree < minDegree) {
+                  color = direction === 1 ? COLOR.GREEN : COLOR.RED;
+                } else if (maxDegree < rightFOVDegree) {
+                  color = direction === 1 ? COLOR.RED : COLOR.GREEN;
                 } else if (minDegree <= rightFOVDegree && rightFOVDegree <= maxDegree) {
-                  opacity = (maxDegree - rightFOVDegree) / (maxDegree - minDegree);
                   color = COLOR.BLUE;
+                  opacity = (direction === 1 ? maxDegree - rightFOVDegree : rightFOVDegree - minDegree) / fullRange;
                 }
               } else {
-                if (90 < minDegree) {
-                  opacity = degree / 360;
+                color = direction === 1 ? COLOR.GREEN : COLOR.RED;
+              }
+              break;
+            case ZONE[4]:
+              if (270 <= rightFOVDegree) {
+                if (rightFOVDegree < minDegree) {
+                  color = direction === 1 ? COLOR.GREEN : COLOR.RED;
+                } else if (maxDegree < rightFOVDegree) {
+                  color = direction === 1 ? COLOR.RED : COLOR.GREEN;
+                } else if (minDegree <= rightFOVDegree && rightFOVDegree <= maxDegree) {
                   color = COLOR.BLUE;
-                } else {
-                  const newMinDegree = Math.max(...coordinateDegrees.filter((d) => d <= 90));
-                  const newMaxDegree = Math.min(...coordinateDegrees.filter((d) => 270 <= d));
-                  if (270 <= rightFOVDegree) {
-                    if (rightFOVDegree < newMaxDegree) {
-                      color = COLOR.GREEN;
-                    } else if (newMaxDegree <= rightFOVDegree) {
-                      opacity = (360 - rightFOVDegree + newMinDegree) / (360 - newMaxDegree + newMinDegree);
-                      color = COLOR.BLUE;
-                    }
-                  } else {
-                    if (rightFOVDegree <= newMinDegree) {
-                      opacity = (newMinDegree - rightFOVDegree) / (360 - newMaxDegree + newMinDegree);
-                      color = COLOR.BLUE;
-                    }
-                  }
+                  opacity = (direction === 1 ? maxDegree - rightFOVDegree : rightFOVDegree - minDegree) / fullRange;
+                }
+              } else {
+                color = direction === 1 ? COLOR.RED : COLOR.GREEN;
+              }
+              break;
+            case ZONE[12]:
+              if (leftFOVDegree <= 180) {
+                if (rightFOVDegree < minDegree && maxDegree < leftFOVDegree) {
+                  color = direction === 1 ? COLOR.GREEN : COLOR.RED;
+                } else if (minDegree <= rightFOVDegree && leftFOVDegree <= maxDegree) {
+                  color = COLOR.BLUE;
+                  opacity = (direction === 1 ? leftFOVDegree - rightFOVDegree : fullRange - (leftFOVDegree - rightFOVDegree)) / fullRange;
+                } else if (minDegree <= rightFOVDegree) {
+                  color = COLOR.BLUE;
+                  opacity = (direction === 1 ? maxDegree - rightFOVDegree : rightFOVDegree - minDegree) / fullRange;
+                } else if (leftFOVDegree <= maxDegree) {
+                  color = COLOR.BLUE;
+                  opacity = (direction === 1 ? leftFOVDegree - minDegree : maxDegree - leftFOVDegree) / fullRange;
+                }
+              } else {
+                color = direction === 1 ? COLOR.GREEN : COLOR.RED;
+              }
+              break;
+            case ZONE[2]:
+            case ZONE[23]:
+            case ZONE[3]:
+              if (leftFOVDegree < minDegree) {
+                color = direction === 1 ? COLOR.RED : COLOR.GREEN;
+              } else if (maxDegree < leftFOVDegree) {
+                color = direction === 1 ? COLOR.GREEN : COLOR.RED;
+              } else if (minDegree <= leftFOVDegree && leftFOVDegree <= maxDegree) {
+                color = COLOR.BLUE;
+                opacity = (direction === 1 ? leftFOVDegree - minDegree : maxDegree - leftFOVDegree) / fullRange;
+              }
+              break;
+            case ZONE[34]:
+              if (180 < leftFOVDegree) {
+                if (leftFOVDegree < minDegree && maxDegree < rightFOVDegree) {
+                  color = direction === 1 ? COLOR.RED : COLOR.GREEN;
+                } else if (minDegree <= leftFOVDegree && rightFOVDegree <= maxDegree) {
+                  color = COLOR.BLUE;
+                  opacity = (direction === 1 ? fullRange - (rightFOVDegree - leftFOVDegree) : rightFOVDegree - leftFOVDegree) / fullRange;
+                } else if (minDegree <= leftFOVDegree) {
+                  color = COLOR.BLUE;
+                  opacity = (direction === 1 ? leftFOVDegree - minDegree : maxDegree - leftFOVDegree) / fullRange;
+                } else if (rightFOVDegree <= maxDegree) {
+                  color = COLOR.BLUE;
+                  opacity = (direction === 1 ? maxDegree - rightFOVDegree : rightFOVDegree - minDegree) / fullRange;
+                }
+              } else {
+                color = direction === 1 ? COLOR.RED : COLOR.GREEN;
+              }
+              break;
+            case ZONE[14]:
+              fullRange = 360 - fullRange;
+              if (rightFOVDegree <= 90) {
+                if (minDegree < rightFOVDegree) {
+                  color = direction === 1 ? COLOR.RED : COLOR.GREEN;
+                } else if (rightFOVDegree <= minDegree) {
+                  color = COLOR.BLUE;
+                  opacity = (direction === 1 ? minDegree - rightFOVDegree : fullRange - (minDegree - rightFOVDegree)) / fullRange;
+                }
+              } else {
+                if (rightFOVDegree < maxDegree) {
+                  color = direction === 1 ? COLOR.GREEN : COLOR.RED;
+                } else if (maxDegree <= rightFOVDegree) {
+                  color = COLOR.BLUE;
+                  opacity = (direction === 1 ? fullRange - (rightFOVDegree - maxDegree) : rightFOVDegree - maxDegree) / fullRange;
                 }
               }
-            }
+              break;
+            case ZONE[1234]:
+              fullRange = 360;
+              if (leftFOVDegree <= 180) {
+                color = COLOR.BLUE;
+                opacity = (direction === 1 ? leftFOVDegree - rightFOVDegree : fullRange - (leftFOVDegree - rightFOVDegree)) / fullRange;
+              } else {
+                color = COLOR.BLUE;
+                opacity = (direction === 1 ? fullRange - (rightFOVDegree - leftFOVDegree) : rightFOVDegree - leftFOVDegree) / fullRange;
+              }
+              break;
+            default:
+              break;
           }
         }
-
-        const id = index + '';
 
         newShapes.push({
           id,
